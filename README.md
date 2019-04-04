@@ -1,0 +1,2 @@
+# kfwproxy
+Kobo API proxy for [kobofirmware](https://pgaskin.net/KoboStuff/kobofirmware.html) to enable cross-origin requests and caching. Each response is cached for 30 minutes to reduce the load on Kobo servers (otherwise there would be around half a million requests per day). In the future, kfwproxy will also support batched requests for better performance (currently, there are 112 requests per page load).
