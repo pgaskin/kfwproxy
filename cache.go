@@ -46,7 +46,7 @@ func (c *memoryCache) Clean() {
 	}
 
 	// TODO: this is inefficient
-	if c.size > c.Limit {
+	if c.Limit > 0 && c.size > c.Limit {
 		ids, times := make([]string, len(c.entries)), make([]time.Time, len(c.entries))
 		var i int
 		for id, entry := range c.entries {
@@ -86,7 +86,7 @@ func (c *memoryCache) Put(id string, buf []byte, extra string, exp time.Duration
 	defer c.mu.Unlock()
 	c.ensureInit()
 
-	if int64(len(buf)) > c.Limit {
+	if c.Limit > 0 && int64(len(buf)) > c.Limit {
 		if c.Verbose {
 			fmt.Printf("memoryCache.Put: cache too full: %s: %s\n", exp, id)
 		}

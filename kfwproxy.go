@@ -21,6 +21,7 @@ func main() {
 	h := &memoryCache{Limit: *cacheLimit * 1000000, Verbose: *verbose}
 	r := httprouter.New()
 
+	r.GET("/", handler(http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect)))
 	r.GET("/stats", handler(http.HandlerFunc(h.handleStats)))
 
 	r.GET("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", handler(
