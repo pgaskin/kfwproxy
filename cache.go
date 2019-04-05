@@ -41,6 +41,7 @@ func (c *memoryCache) Clean() {
 			if c.Verbose {
 				fmt.Printf("memoryCache.Clean: cache expired: removed %#v\n", id)
 			}
+			c.size -= int64(len(c.entries[id].buf))
 			delete(c.entries, id)
 		}
 	}
