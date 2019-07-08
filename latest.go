@@ -35,7 +35,7 @@ func (l *latestTracker) HandleNotes(w http.ResponseWriter, r *http.Request) {
 func (l *latestTracker) HandleVersionSVG(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "no-store, must-revalidate")
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8" ?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="80" height="12"><text x="0" y="12" font-size="12" font-family="Verdana, Arial, Helvetica, sans-serif" fill="#000">%s</text></svg>`, l.version)
+	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8" ?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="72" height="12"><text x="0" y="12" font-size="12" font-family="Verdana, Arial, Helvetica, sans-serif" fill="#000">%s</text></svg>`, l.version)
 }
 
 func (l *latestTracker) HandleVersionPNG(w http.ResponseWriter, r *http.Request) {
