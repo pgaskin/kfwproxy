@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pbnjay/pixfont"
 )
@@ -46,7 +47,7 @@ func (l *latestTracker) HandleVersionSVG(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "no-store, must-revalidate")
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="%s" height="%s"><text x="0" y="%s" font-size="%s" font-family="%s" fill="%s">%s</text></svg>`, fw, fh, fh, fh, ff, fc, l.version)
+	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="%s" height="%s"><text x="0" y="%s" font-size="%s" font-family="%s" fill="%s">%s</text><!--%s--></svg>`, fw, fh, fh, fh, ff, fc, l.version, time.Now())
 }
 
 func (l *latestTracker) HandleVersionPNG(w http.ResponseWriter, r *http.Request) {
