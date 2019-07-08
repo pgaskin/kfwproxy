@@ -26,6 +26,13 @@ type memoryCache struct {
 	hits, puts, misses int64
 }
 
+// CleanEvery runs Clean at a specified interval. This is intended to be run as a goroutine.
+func (c *memoryCache) CleanEvery(i time.Duration) {
+	for range time.Tick(i) {
+		c.Clean()
+	}
+}
+
 // Clean cleans up expired cache entries and removes entries if over the size limit.
 func (c *memoryCache) Clean() {
 	c.mu.Lock()
@@ -138,7 +145,7 @@ func (c *memoryCache) ensureInit() {
 	}
 }
 
-func (c *memoryCache) handleStats(w http.ResponseWriter, r *http.Request) {
+func (c *memoryCache) HandleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	enc := json.NewEncoder(w)

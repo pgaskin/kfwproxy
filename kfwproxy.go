@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
-	"github.com/ogier/pflag"
+	"github.com/spf13/pflag"
 )
 
 func main() {
@@ -19,28 +19,29 @@ func main() {
 
 	c := &http.Client{Timeout: *timeout}
 	h := &memoryCache{Limit: *cacheLimit * 1000000, Verbose: *verbose}
+	l := &latestTracker{}
 	r := httprouter.New()
 
+	go h.CleanEvery(time.Minute)
+
 	r.GET("/", handler(http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect)))
-	r.GET("/stats", handler(http.HandlerFunc(h.handleStats)))
+	r.GET("/stats", handler(http.HandlerFunc(h.HandleStats)))
+	r.GET("/latest/notes", handler(http.HandlerFunc(l.HandleNotes)))
+	r.GET("/latest/version", handler(http.HandlerFunc(l.HandleVersion)))
+	r.GET("/latest/notes/redir", handler(http.HandlerFunc(l.HandleNotesRedir)))
+	r.GET("/latest/version/redir", handler(http.HandlerFunc(l.HandleVersionRedir)))
 
 	r.GET("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", handler(
 		proxyHandler(c, true, true, h, time.Hour/2, []string{"X-Kobo-Accept-Preview"}, func(r *http.Request) string {
 			return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview")
-		}),
+		}, l.InterceptUpgradeCheck),
 	))
 
 	r.GET("/api.kobobooks.com/1.0/ReleaseNotes/:idx", handler(
 		proxyHandler(c, true, true, h, time.Hour*3, nil, func(r *http.Request) string {
 			return r.URL.String()
-		}),
+		}, nil),
 	))
-
-	go func() {
-		for range time.Tick(time.Minute) {
-			h.Clean()
-		}
-	}()
 
 	fmt.Printf("Listening on http://%s\n", *addr)
 	if err := http.ListenAndServe(*addr, r); err != nil {
