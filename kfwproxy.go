@@ -28,6 +28,7 @@ func main() {
 	r.GET("/stats", handler(http.HandlerFunc(h.HandleStats)))
 	r.GET("/latest/notes", handler(http.HandlerFunc(l.HandleNotes)))
 	r.GET("/latest/version", handler(http.HandlerFunc(l.HandleVersion)))
+	r.GET("/latest/version/svg", handler(http.HandlerFunc(l.HandleVersionSVG)))
 	r.GET("/latest/notes/redir", handler(http.HandlerFunc(l.HandleNotesRedir)))
 	r.GET("/latest/version/redir", handler(http.HandlerFunc(l.HandleVersionRedir)))
 

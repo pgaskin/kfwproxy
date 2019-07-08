@@ -27,6 +27,11 @@ func (l *latestTracker) HandleNotes(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%d", l.notes)
 }
 
+func (l *latestTracker) HandleVersionSVG(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8" ?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="80" height="12"><text x="0" y="12" font-size="12" fill="#000">%s</text></svg>`, l.version)
+}
+
 func (l *latestTracker) HandleVersionRedir(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, l.versionURL, http.StatusTemporaryRedirect)
 }
