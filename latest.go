@@ -33,9 +33,20 @@ func (l *latestTracker) HandleNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (l *latestTracker) HandleVersionSVG(w http.ResponseWriter, r *http.Request) {
+	fn := func(p, d string) string {
+		if v := r.URL.Query().Get(p); v != "" {
+			return strings.ReplaceAll(v, `"`, `'`)
+		}
+		return d
+	}
+	fw := fn("fw", "72")
+	fh := fn("fh", "12")
+	ff := fn("ff", "Verdana, Arial, Helvetica, sans-serif")
+	fc := fn("fc", "#000")
+
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "no-store, must-revalidate")
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8" ?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="72" height="12"><text x="0" y="12" font-size="12" font-family="Verdana, Arial, Helvetica, sans-serif" fill="#000">%s</text></svg>`, l.version)
+	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="%s" height="%s"><text x="0" y="%s" font-size="%s" font-family="%s" fill="%s">%s</text></svg>`, fw, fh, fh, fh, ff, fc, l.version)
 }
 
 func (l *latestTracker) HandleVersionPNG(w http.ResponseWriter, r *http.Request) {
