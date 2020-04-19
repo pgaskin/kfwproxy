@@ -8,6 +8,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type cache interface {
@@ -159,6 +161,37 @@ func (c *memoryCache) HandleStats(w http.ResponseWriter, r *http.Request) {
 		"misses": c.misses,
 		"puts":   c.puts,
 	})
+}
+
+// Describe implements prometheus.Collector.
+func (c *memoryCache) Describe(v chan<- *prometheus.Desc) {}
+
+// Collect implements prometheus.Collector.
+func (c *memoryCache) Collect(v chan<- prometheus.Metric) {
+	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "kfwproxy_uptime_seconds_total",
+		Help: "The amount of time kfwproxy has been running for",
+	}, func() float64 { return time.Now().Sub(c.init).Seconds() })
+	v <- prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "kfwproxy_cache_len_count",
+		Help: "The number of entries currently in the cache",
+	}, func() float64 { return float64(len(c.entries)) })
+	v <- prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "kfwproxy_cache_size_bytes",
+		Help: "The total cache size",
+	}, func() float64 { return float64(c.size) })
+	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "kfwproxy_cache_hits_count",
+		Help: "The number of requests resulting in cache hits (requests = hits + misses)",
+	}, func() float64 { return float64(c.hits) })
+	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "kfwproxy_cache_misses_count",
+		Help: "The number of requests resulting in cache misses (requests = hits + misses)",
+	}, func() float64 { return float64(c.misses) })
+	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "kfwproxy_cache_puts_count",
+		Help: "The number of cache misses resulting in a successful put (errors = puts - misses)",
+	}, func() float64 { return float64(c.puts) })
 }
 
 type memoryCacheEntry struct {

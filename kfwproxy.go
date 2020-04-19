@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
 )
 
@@ -21,11 +23,18 @@ func main() {
 	h := &memoryCache{Limit: *cacheLimit * 1000000, Verbose: *verbose}
 	l := &latestTracker{}
 	r := httprouter.New()
+	p := prometheus.NewRegistry()
 
 	go h.CleanEvery(time.Minute)
 
+	p.MustRegister(prometheus.NewGoCollector())
+	p.MustRegister(h)
+
 	r.GET("/", handler(http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect)))
+
 	r.GET("/stats", handler(http.HandlerFunc(h.HandleStats)))
+	r.GET("/metrics", handler(promhttp.HandlerFor(p, promhttp.HandlerOpts{})))
+
 	r.GET("/latest/notes", handler(http.HandlerFunc(l.HandleNotes)))
 	r.GET("/latest/version", handler(http.HandlerFunc(l.HandleVersion)))
 	r.GET("/latest/version/svg", handler(http.HandlerFunc(l.HandleVersionSVG)))
