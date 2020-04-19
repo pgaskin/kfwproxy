@@ -171,7 +171,7 @@ func (c *memoryCache) WritePrometheus(w io.Writer) {
 	m.NewGauge("kfwproxy_cache_size_bytes", func() float64 { return float64(c.size) })
 	m.NewCounter("kfwproxy_cache_hits_count").Set(uint64(c.hits))
 	m.NewCounter("kfwproxy_cache_misses_count").Set(uint64(c.misses))
-	m.NewCounter("kfwproxy_cache_puts").Set(uint64(c.puts))
+	m.NewCounter("kfwproxy_cache_puts_count").Set(uint64(c.puts))
 	m.WritePrometheus(w)
 }
 

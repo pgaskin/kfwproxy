@@ -15,6 +15,36 @@ func main() {
 	timeout := pflag.DurationP("timeout", "t", time.Second*4, "Timeout for proxied requests")
 	cacheLimit := pflag.Int64P("cache-limit", "l", 50, "Limit for cache size in MB")
 	verbose := pflag.BoolP("verbose", "v", false, "Verbose logging")
+
+	envmap := map[string]string{
+		"addr":        "KFWPROXY_ADDR",
+		"timeout":     "KFWPROXY_TIMEOUT",
+		"cache-limit": "KFWPROXY_CACHE_LIMIT",
+		"verbose":     "KFWPROXY_VERBOSE",
+	}
+
+	if val, ok := os.LookupEnv("PORT"); ok {
+		val = ":" + val
+		fmt.Printf("Setting --addr from PORT to %#v\n", val)
+		if err := pflag.Set("addr", val); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(2)
+		}
+	}
+
+	pflag.VisitAll(func(flag *pflag.Flag) {
+		if env, ok := envmap[flag.Name]; ok {
+			flag.Usage += fmt.Sprintf(" (env %s)", env)
+			if val, ok := os.LookupEnv(env); ok {
+				fmt.Printf("Setting --%s from %s to %#v\n", flag.Name, env, val)
+				if err := flag.Value.Set(val); err != nil {
+					fmt.Printf("Error: %v\n", err)
+					os.Exit(2)
+				}
+			}
+		}
+	})
+
 	pflag.Parse()
 
 	c := &http.Client{Timeout: *timeout}

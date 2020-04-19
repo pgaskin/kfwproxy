@@ -33,7 +33,7 @@ func (c *latestTracker) WritePrometheus(w io.Writer) {
 
 	m := metrics.NewSet()
 	if c.versionURL != "" {
-		m.NewGauge("kfwproxy_latest_version{full='"+c.version.String()+"'}", func() float64 { return float64(int(c.version[2])) })
+		m.NewGauge("kfwproxy_latest_version{full=\""+c.version.String()+"\"}", func() float64 { return float64(int(c.version[2])) })
 	}
 	if c.notes != 0 {
 		m.NewGauge("kfwproxy_latest_notes", func() float64 { return float64(int(c.notes)) })
