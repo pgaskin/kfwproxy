@@ -17,16 +17,18 @@ func main() {
 	cacheLimit := pflag.Int64P("cache-limit", "l", 50, "limit for cache size in MB")
 	telegramBot := pflag.StringP("telegram-bot", "B", "", "the Telegram bot token (to enable notifications) (requires telegram-chat)")
 	telegramChat := pflag.StringSliceP("telegram-chat", "b", nil, "the Telegram chat IDs to send messages to (find it using @IDBot) (can also specify a channel in the format @ChannelUsername) (requires telegram-bot)")
+	telegramForce := pflag.StringSlice("telegram-force", nil, "send Telegram messages to these chats even if the original version is zero (for debugging only)")
 	verbose := pflag.BoolP("verbose", "v", false, "Verbose logging")
 	help := pflag.BoolP("help", "h", false, "show this help text")
 
 	envmap := map[string]string{
-		"addr":          "KFWPROXY_ADDR",
-		"timeout":       "KFWPROXY_TIMEOUT",
-		"cache-limit":   "KFWPROXY_CACHE_LIMIT",
-		"telegram-bot":  "KFWPROXY_TELEGRAM_BOT",
-		"telegram-chat": "KFWPROXY_TELEGRAM_CHAT",
-		"verbose":       "KFWPROXY_VERBOSE",
+		"addr":           "KFWPROXY_ADDR",
+		"timeout":        "KFWPROXY_TIMEOUT",
+		"cache-limit":    "KFWPROXY_CACHE_LIMIT",
+		"telegram-bot":   "KFWPROXY_TELEGRAM_BOT",
+		"telegram-chat":  "KFWPROXY_TELEGRAM_CHAT",
+		"telegram-force": "KFWPROXY_TELEGRAM_FORCE",
+		"verbose":        "KFWPROXY_VERBOSE",
 	}
 
 	if val, ok := os.LookupEnv("PORT"); ok {
@@ -59,6 +61,20 @@ func main() {
 		return
 	}
 
+	for _, fid := range *telegramForce {
+		var f bool
+		for _, id := range *telegramChat {
+			if id == fid {
+				f = true
+			}
+		}
+		if !f {
+			fmt.Fprintf(os.Stderr, "Error: All chat IDs in telegram-force must be specified in telegram-chat as well.\n")
+			os.Exit(2)
+			return
+		}
+	}
+
 	if pflag.NArg() != 0 || *help {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\nOptions:\n%s", os.Args[0], pflag.CommandLine.FlagUsages())
 		if len(os.Args) != 1 {
@@ -87,6 +103,13 @@ func main() {
 			t.NewGauge("kfwproxy_telegram_chats_registered_count{bot=\""+tc.GetUsername()+"\"}", func() float64 { return float64(treg) })
 			t.NewGauge("kfwproxy_telegram_chats_errored_count{bot=\""+tc.GetUsername()+"\"}", func() float64 { return float64(terr) })
 			for _, id := range *telegramChat {
+				var f bool
+				for _, fid := range *telegramForce {
+					if fid == id {
+						f = true
+						break
+					}
+				}
 				if u, err := tc.GetChatUsername(id); err != nil {
 					terr++
 					fmt.Fprintf(os.Stderr, "Telegram: error: add chat %s: %v.\n", id, err)
@@ -97,6 +120,10 @@ func main() {
 					tms := t.NewCounter("kfwproxy_telegram_messages_sent_total{bot=\"" + tc.GetUsername() + "\",chat=\"" + u + "\"}")
 					tme := t.NewCounter("kfwproxy_telegram_messages_errored_total{bot=\"" + tc.GetUsername() + "\",chat=\"" + u + "\"}")
 					l.Notify(func(old, new version) {
+						if old.Zero() && !f {
+							fmt.Printf("Telegram: not sending message to %s (%s) about (%s, %s) since original version is zero (i.e. kfwproxy just started).\n", u, id, old, new)
+							return
+						}
 						fmt.Printf("Telegram: sending message to %s (%s) about (%s, %s).\n", u, id, old, new)
 						if err := tc.SendMessage(id, fmt.Sprintf(`Kobo firmware <b>%s</b> has been released!`+"\n"+`<a href="https://pgaskin.net/KoboStuff/kobofirmware.html">More information.</a>`, new)); err != nil {
 							tme.Inc()
