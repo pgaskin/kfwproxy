@@ -3,13 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/VictoriaMetrics/metrics"
 )
 
 type cache interface {
@@ -39,7 +40,6 @@ func (c *memoryCache) CleanEvery(i time.Duration) {
 func (c *memoryCache) Clean() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.ensureInit()
 
 	if c.Verbose {
 		fmt.Printf("memoryCache.Clean: running cleanup size=%d/%d entries=%d\n", c.size, c.Limit, len(c.entries))
@@ -94,7 +94,6 @@ func (c *memoryCache) Clean() {
 func (c *memoryCache) Put(id string, buf []byte, extra string, exp time.Duration) (time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.ensureInit()
 
 	if c.Limit > 0 && int64(len(buf)) > c.Limit {
 		if c.Verbose {
@@ -121,7 +120,6 @@ func (c *memoryCache) Put(id string, buf []byte, extra string, exp time.Duration
 func (c *memoryCache) Get(id string) (buf []byte, extra string, exp time.Time, ct time.Time, ok bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	c.ensureInit()
 
 	ent, f := c.entries[id]
 	if !f || ent == nil || time.Now().After(ent.exp) {
@@ -140,10 +138,10 @@ func (c *memoryCache) Get(id string) (buf []byte, extra string, exp time.Time, c
 	return ent.buf, ent.extra, ent.exp, ent.ct, true
 }
 
-func (c *memoryCache) ensureInit() {
-	if c.entries == nil {
-		c.entries = map[string]*memoryCacheEntry{}
-		c.init = time.Now()
+func newMemoryCache(limitBytes int64, verbose bool) *memoryCache {
+	return &memoryCache{
+		entries: map[string]*memoryCacheEntry{},
+		init:    time.Now(),
 	}
 }
 
@@ -163,35 +161,18 @@ func (c *memoryCache) HandleStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Describe implements prometheus.Collector.
-func (c *memoryCache) Describe(v chan<- *prometheus.Desc) {}
+func (c *memoryCache) WritePrometheus(w io.Writer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-// Collect implements prometheus.Collector.
-func (c *memoryCache) Collect(v chan<- prometheus.Metric) {
-	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
-		Name: "kfwproxy_uptime_seconds_total",
-		Help: "The amount of time kfwproxy has been running for",
-	}, func() float64 { return time.Now().Sub(c.init).Seconds() })
-	v <- prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "kfwproxy_cache_len_count",
-		Help: "The number of entries currently in the cache",
-	}, func() float64 { return float64(len(c.entries)) })
-	v <- prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "kfwproxy_cache_size_bytes",
-		Help: "The total cache size",
-	}, func() float64 { return float64(c.size) })
-	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
-		Name: "kfwproxy_cache_hits_count",
-		Help: "The number of requests resulting in cache hits (requests = hits + misses)",
-	}, func() float64 { return float64(c.hits) })
-	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
-		Name: "kfwproxy_cache_misses_count",
-		Help: "The number of requests resulting in cache misses (requests = hits + misses)",
-	}, func() float64 { return float64(c.misses) })
-	v <- prometheus.NewCounterFunc(prometheus.CounterOpts{
-		Name: "kfwproxy_cache_puts_count",
-		Help: "The number of cache misses resulting in a successful put (errors = puts - misses)",
-	}, func() float64 { return float64(c.puts) })
+	m := metrics.NewSet()
+	m.NewCounter("kfwproxy_uptime_seconds_total").Set(uint64(int(time.Now().Sub(c.init).Seconds())))
+	m.NewGauge("kfwproxy_cache_len_count", func() float64 { return float64(len(c.entries)) })
+	m.NewGauge("kfwproxy_cache_size_bytes", func() float64 { return float64(c.size) })
+	m.NewCounter("kfwproxy_cache_hits_count").Set(uint64(c.hits))
+	m.NewCounter("kfwproxy_cache_misses_count").Set(uint64(c.misses))
+	m.NewCounter("kfwproxy_cache_puts").Set(uint64(c.puts))
+	m.WritePrometheus(w)
 }
 
 type memoryCacheEntry struct {

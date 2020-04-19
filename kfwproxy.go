@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
 )
 
@@ -20,27 +18,25 @@ func main() {
 	pflag.Parse()
 
 	c := &http.Client{Timeout: *timeout}
-	h := &memoryCache{Limit: *cacheLimit * 1000000, Verbose: *verbose}
+	h := newMemoryCache(*cacheLimit*1000000, *verbose)
 	l := &latestTracker{}
 	r := httprouter.New()
-	p := prometheus.NewRegistry()
 
 	go h.CleanEvery(time.Minute)
 
-	p.MustRegister(prometheus.NewGoCollector())
-	p.MustRegister(h)
-
 	r.GET("/", handler(http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect)))
-
 	r.GET("/stats", handler(http.HandlerFunc(h.HandleStats)))
-	r.GET("/metrics", handler(promhttp.HandlerFor(p, promhttp.HandlerOpts{})))
-
 	r.GET("/latest/notes", handler(http.HandlerFunc(l.HandleNotes)))
 	r.GET("/latest/version", handler(http.HandlerFunc(l.HandleVersion)))
 	r.GET("/latest/version/svg", handler(http.HandlerFunc(l.HandleVersionSVG)))
 	r.GET("/latest/version/png", handler(http.HandlerFunc(l.HandleVersionPNG)))
 	r.GET("/latest/notes/redir", handler(http.HandlerFunc(l.HandleNotesRedir)))
 	r.GET("/latest/version/redir", handler(http.HandlerFunc(l.HandleVersionRedir)))
+
+	r.GET("/metrics", handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.WritePrometheus(w)
+		l.WritePrometheus(w)
+	})))
 
 	r.GET("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", handler(
 		proxyHandler(c, true, true, h, time.Hour/2, []string{"X-Kobo-Accept-Preview"}, func(r *http.Request) string {

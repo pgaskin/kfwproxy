@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/pbnjay/pixfont"
 )
 
@@ -23,6 +25,20 @@ type latestTracker struct {
 	notesURL   string
 	versionMu  sync.RWMutex
 	notesMu    sync.RWMutex
+}
+
+func (c *latestTracker) WritePrometheus(w io.Writer) {
+	c.versionMu.Lock()
+	defer c.versionMu.Unlock()
+
+	m := metrics.NewSet()
+	if c.versionURL != "" {
+		m.NewGauge("kfwproxy_latest_version{full='"+c.version.String()+"'}", func() float64 { return float64(int(c.version[2])) })
+	}
+	if c.notes != 0 {
+		m.NewGauge("kfwproxy_latest_notes", func() float64 { return float64(int(c.notes)) })
+	}
+	m.WritePrometheus(w)
 }
 
 func (l *latestTracker) HandleVersion(w http.ResponseWriter, r *http.Request) {
