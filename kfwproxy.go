@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/pflag"
 )
@@ -73,6 +74,7 @@ func main() {
 	l := &latestTracker{}
 	r := httprouter.New()
 
+	t := metrics.NewSet()
 	if *telegramBot != "" {
 		go func() {
 			fmt.Printf("Telegram: initializing.\n")
@@ -81,16 +83,26 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Telegram: error: initialize bot: %v.\n", err)
 				return
 			}
+			var treg, terr int
+			t.NewGauge("kfwproxy_telegram_chats_registered_count{bot=\""+tc.GetUsername()+"\"}", func() float64 { return float64(treg) })
+			t.NewGauge("kfwproxy_telegram_chats_errored_count{bot=\""+tc.GetUsername()+"\"}", func() float64 { return float64(terr) })
 			for _, id := range *telegramChat {
 				if u, err := tc.GetChatUsername(id); err != nil {
+					terr++
 					fmt.Fprintf(os.Stderr, "Telegram: error: add chat %s: %v.\n", id, err)
 					continue
 				} else {
+					treg++
 					fmt.Printf("Telegram: sending new versions to %s (%s) via %s.\n", u, id, tc.GetUsername())
+					tms := t.NewCounter("kfwproxy_telegram_messages_sent_total{bot=\"" + tc.GetUsername() + "\",chat=\"" + u + "\"}")
+					tme := t.NewCounter("kfwproxy_telegram_messages_errored_total{bot=\"" + tc.GetUsername() + "\",chat=\"" + u + "\"}")
 					l.Notify(func(old, new version) {
 						fmt.Printf("Telegram: sending message to %s (%s) about (%s, %s).\n", u, id, old, new)
 						if err := tc.SendMessage(id, fmt.Sprintf(`Kobo firmware <b>%s</b> has been released!`+"\n"+`<a href="https://pgaskin.net/KoboStuff/kobofirmware.html">More information.</a>`, new)); err != nil {
+							tme.Inc()
 							fmt.Fprintf(os.Stderr, "Telegram: error: send message to %s: %v\n", id, err)
+						} else {
+							tms.Inc()
 						}
 					})
 				}
@@ -112,6 +124,7 @@ func main() {
 	r.GET("/metrics", handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.WritePrometheus(w)
 		l.WritePrometheus(w)
+		t.WritePrometheus(w)
 	})))
 
 	r.GET("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", handler(
