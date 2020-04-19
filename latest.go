@@ -25,18 +25,25 @@ type latestTracker struct {
 	notesURL   string
 	versionMu  sync.RWMutex
 	notesMu    sync.RWMutex
+	notifier   []func(old, new version)
 }
 
-func (c *latestTracker) WritePrometheus(w io.Writer) {
-	c.versionMu.Lock()
-	defer c.versionMu.Unlock()
+func (l *latestTracker) Notify(fn func(old, new version)) {
+	if fn != nil {
+		l.notifier = append(l.notifier, fn)
+	}
+}
+
+func (l *latestTracker) WritePrometheus(w io.Writer) {
+	l.versionMu.Lock()
+	defer l.versionMu.Unlock()
 
 	m := metrics.NewSet()
-	if c.versionURL != "" {
-		m.NewGauge("kfwproxy_latest_version{full=\""+c.version.String()+"\"}", func() float64 { return float64(int(c.version[2])) })
+	if !l.version.Zero() {
+		m.NewGauge("kfwproxy_latest_version{full=\""+l.version.String()+"\"}", func() float64 { return float64(int(l.version[2])) })
 	}
-	if c.notes != 0 {
-		m.NewGauge("kfwproxy_latest_notes", func() float64 { return float64(int(c.notes)) })
+	if l.notes != 0 {
+		m.NewGauge("kfwproxy_latest_notes", func() float64 { return float64(int(l.notes)) })
 	}
 	m.WritePrometheus(w)
 }
@@ -90,10 +97,13 @@ func (l *latestTracker) UpdateVersion(url string) {
 	l.versionMu.Lock()
 	defer l.versionMu.Unlock()
 	if url != "" {
-		v := extractVersion(url)
-		if l.version.Less(v) {
-			l.version = v
+		new := extractVersion(url)
+		if old := l.version; old.Less(new) {
+			l.version = new
 			l.versionURL = url
+			for _, fn := range l.notifier {
+				go fn(old, new)
+			}
 		}
 	}
 }
@@ -148,4 +158,8 @@ func (v version) Less(w version) bool {
 
 func (v version) Equal(w version) bool {
 	return v[0] == w[0] && v[1] == w[1] && v[2] == w[2]
+}
+
+func (v version) Zero() bool {
+	return v[0] == 0 && v[1] == 0 && v[2] == 0
 }
