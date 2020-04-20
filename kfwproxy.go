@@ -140,17 +140,33 @@ func main() {
 		}
 	})))
 
-	r.GET("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", handler(
-		proxyHandler(c, true, true, h, *cacheTime, []string{"X-Kobo-Accept-Preview"}, func(r *http.Request) string {
-			return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview")
-		}, l.InterceptUpgradeCheck),
-	))
+	upgradeCheck := handler(&ProxyHandler{
+		Client:      c,
+		PassHeaders: []string{"X-Kobo-Accept-Preview"},
+		UserAgent:   "kfwproxy (github.com/geek1011/kfwproxy)",
+		Server:      "kfwproxy",
+		CORS:        true,
+		Hook:        func(buf []byte) { go l.InterceptUpgradeCheck(buf) },
+		Cache:       h,
+		CacheTTL:    *cacheTime,
+		CacheID:     func(r *http.Request) string { return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview") },
+	})
+	r.GET("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", upgradeCheck)
+	r.HEAD("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", upgradeCheck)
+	r.OPTIONS("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", upgradeCheck)
 
-	r.GET("/api.kobobooks.com/1.0/ReleaseNotes/:idx", handler(
-		proxyHandler(c, true, true, h, time.Hour*3, nil, func(r *http.Request) string {
-			return r.URL.String()
-		}, nil),
-	))
+	releaseNotes := handler(&ProxyHandler{
+		Client:    c,
+		UserAgent: "kfwproxy (github.com/geek1011/kfwproxy)",
+		Server:    "kfwproxy",
+		CORS:      true,
+		Cache:     h,
+		CacheTTL:  time.Hour * 3,
+		CacheID:   func(r *http.Request) string { return r.URL.String() },
+	})
+	r.GET("/api.kobobooks.com/1.0/ReleaseNotes/:idx", releaseNotes)
+	r.HEAD("/api.kobobooks.com/1.0/ReleaseNotes/:idx", releaseNotes)
+	r.OPTIONS("/api.kobobooks.com/1.0/ReleaseNotes/:idx", releaseNotes)
 
 	fmt.Printf("Listening on http://%s\n", *addr)
 	if err := http.ListenAndServe(*addr, r); err != nil {

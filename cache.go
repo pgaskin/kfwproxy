@@ -11,8 +11,8 @@ import (
 )
 
 type Cache interface {
-	Put(key string, data []byte, extra string, ttl time.Duration) (exp time.Time, ok bool)
-	Get(key string) (data []byte, extra string, exp time.Time, ct time.Time, ok bool)
+	Put(key string, data []byte, hdr http.Header, ttl time.Duration) (exp time.Time, ok bool)
+	Get(key string) (data []byte, hdr http.Header, exp time.Time, ct time.Time, ok bool)
 }
 
 type RistrettoCache struct {
@@ -22,7 +22,7 @@ type RistrettoCache struct {
 type ristrettoEnt struct {
 	ct, exp time.Time
 	data    []byte
-	extra   string
+	hdr     http.Header
 }
 
 func NewRistrettoCache(maxBytes int64) *RistrettoCache {
@@ -38,23 +38,23 @@ func NewRistrettoCache(maxBytes int64) *RistrettoCache {
 	return &RistrettoCache{r}
 }
 
-func (r *RistrettoCache) Put(key string, data []byte, extra string, ttl time.Duration) (time.Time, bool) {
+func (r *RistrettoCache) Put(key string, data []byte, hdr http.Header, ttl time.Duration) (time.Time, bool) {
 	ct := time.Now()
 	exp := ct.Add(ttl)
 	return exp, r.r.SetWithTTL(key, ristrettoEnt{
-		ct:    ct,
-		exp:   exp,
-		data:  data,
-		extra: extra,
+		ct:   ct,
+		exp:  exp,
+		data: data,
+		hdr:  hdr,
 	}, int64(len(data)), ttl)
 }
 
-func (r *RistrettoCache) Get(key string) ([]byte, string, time.Time, time.Time, bool) {
+func (r *RistrettoCache) Get(key string) ([]byte, http.Header, time.Time, time.Time, bool) {
 	if enti, ok := r.r.Get(key); ok {
 		ent := enti.(ristrettoEnt)
-		return ent.data, ent.extra, ent.exp, ent.ct, true
+		return ent.data, ent.hdr, ent.exp, ent.ct, true
 	} else {
-		return nil, "", time.Time{}, time.Time{}, false
+		return nil, nil, time.Time{}, time.Time{}, false
 	}
 }
 
