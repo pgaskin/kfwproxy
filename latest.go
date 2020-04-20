@@ -18,10 +18,6 @@ import (
 	"github.com/pbnjay/pixfont"
 )
 
-type KFWHook interface {
-	InterceptUpgradeCheck([]byte)
-}
-
 type LatestTracker struct {
 	n []Notifier
 	// note: this is more efficient than a mutex, and ordering isn't critical

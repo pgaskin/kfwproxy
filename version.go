@@ -33,10 +33,6 @@ func (v Version) Less(w Version) bool {
 	return !(v[0] > w[0] || (v[0] == w[0] && (v[1] > w[1] || (v[1] == w[1] && (v[2] > w[2] || v[2] == w[2])))))
 }
 
-func (v Version) Equal(w Version) bool {
-	return v[0] == w[0] && v[1] == w[1] && v[2] == w[2]
-}
-
 func (v Version) Zero() bool {
 	return v[0] == 0 && v[1] == 0 && v[2] == 0
 }
