@@ -14,7 +14,7 @@ import (
 // proxyHandler forwards the GET/HEAD request (everything after the root, use http.StripPrefix if not the base)
 // to the URL and query params passed in the original URL. It also allows adding CORS headers and caching
 // the response.
-func proxyHandler(c *http.Client, https, cors bool, cache cache, cacheTime time.Duration, passHeaders []string, genID func(r *http.Request) string, inspect func([]byte)) http.Handler {
+func proxyHandler(c *http.Client, https, cors bool, cache Cache, cacheTime time.Duration, passHeaders []string, genID func(r *http.Request) string, inspect func([]byte)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := genID(r)
 
