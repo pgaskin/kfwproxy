@@ -90,23 +90,17 @@ func main() {
 		return
 	}
 
-	var p []interface {
-		WritePrometheus(io.Writer)
-	}
-	init := time.Now()
-
-	c := &http.Client{Timeout: *timeout}
-
-	h := NewRistrettoCache(*cacheLimit * 1000000)
-	p = append(p, h)
-
+	var p []interface{ WritePrometheus(io.Writer) }
+	cl := &http.Client{Timeout: *timeout}
+	uc := uptimeCounter(time.Now())
+	c := NewRistrettoCache(*cacheLimit * 1000000)
 	l := NewLatestTracker()
-	p = append(p, l)
+	p = append(p, uc, c, l)
 
 	if *telegramBot != "" {
 		go func() {
 			fmt.Printf("Telegram: initializing.\n")
-			tc, err := NewTelegram(c, *telegramBot)
+			tc, err := NewTelegram(cl, *telegramBot)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Telegram: error: initialize bot: %v.\n", err)
 				return
@@ -117,56 +111,47 @@ func main() {
 			}
 			fmt.Printf("Telegram: sending notifications to %+s via %s.\n", *telegramChat, tc.GetUsername())
 			l.Notify(tn)
-			p = append(p, tn)
+			p = append(p, l)
 		}()
 	}
 
 	r := httprouter.New()
-	r.GET("/", handler(http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect)))
-	r.GET("/stats", handler(http.HandlerFunc(h.StatsHandler(init))))
-	r.GET("/latest/notes", handler(http.HandlerFunc(l.HandleNotes)))
-	r.GET("/latest/version", handler(http.HandlerFunc(l.HandleVersion)))
-	r.GET("/latest/version/svg", handler(http.HandlerFunc(l.HandleVersionSVG)))
-	r.GET("/latest/version/png", handler(http.HandlerFunc(l.HandleVersionPNG)))
-	r.GET("/latest/notes/redir", handler(http.HandlerFunc(l.HandleNotesRedir)))
-	r.GET("/latest/version/redir", handler(http.HandlerFunc(l.HandleVersionRedir)))
 
-	r.GET("/metrics", handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		m := metrics.NewSet()
-		m.NewCounter("kfwproxy_uptime_seconds_total").Set(uint64(int(time.Now().Sub(init).Seconds())))
-		m.WritePrometheus(w)
+	r.Handler("GET", "/", http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect))
+
+	for _, v := range []struct {
+		u string
+		h *ProxyHandler
+	}{
+		{"/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", &ProxyHandler{
+			PassHeaders: []string{"X-Kobo-Accept-Preview"},
+			Hook:        func(buf []byte) { go l.InterceptUpgradeCheck(buf) },
+			CacheTTL:    *cacheTime,
+			CacheID:     func(r *http.Request) string { return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview") },
+		}},
+		{"/api.kobobooks.com/1.0/ReleaseNotes/:idx", &ProxyHandler{
+			CacheTTL: time.Hour * 3,
+			CacheID:  func(r *http.Request) string { return r.URL.String() },
+		}},
+	} {
+		v.h.Client = cl
+		v.h.UserAgent = "kfwproxy (github.com/geek1011/kfwproxy)"
+		v.h.Server = "kfwproxy"
+		v.h.CORS = true
+		v.h.Cache = c
+		for _, m := range []string{"GET", "HEAD", "OPTIONS"} {
+			r.Handler(m, v.u, v.h)
+		}
+	}
+
+	r.HandlerFunc("GET", "/stats", c.StatsHandler(time.Time(uc)))
+	r.HandlerFunc("GET", "/metrics", func(w http.ResponseWriter, r *http.Request) {
 		for _, m := range p {
 			m.WritePrometheus(w)
 		}
-	})))
-
-	upgradeCheck := handler(&ProxyHandler{
-		Client:      c,
-		PassHeaders: []string{"X-Kobo-Accept-Preview"},
-		UserAgent:   "kfwproxy (github.com/geek1011/kfwproxy)",
-		Server:      "kfwproxy",
-		CORS:        true,
-		Hook:        func(buf []byte) { go l.InterceptUpgradeCheck(buf) },
-		Cache:       h,
-		CacheTTL:    *cacheTime,
-		CacheID:     func(r *http.Request) string { return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview") },
 	})
-	r.GET("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", upgradeCheck)
-	r.HEAD("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", upgradeCheck)
-	r.OPTIONS("/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", upgradeCheck)
 
-	releaseNotes := handler(&ProxyHandler{
-		Client:    c,
-		UserAgent: "kfwproxy (github.com/geek1011/kfwproxy)",
-		Server:    "kfwproxy",
-		CORS:      true,
-		Cache:     h,
-		CacheTTL:  time.Hour * 3,
-		CacheID:   func(r *http.Request) string { return r.URL.String() },
-	})
-	r.GET("/api.kobobooks.com/1.0/ReleaseNotes/:idx", releaseNotes)
-	r.HEAD("/api.kobobooks.com/1.0/ReleaseNotes/:idx", releaseNotes)
-	r.OPTIONS("/api.kobobooks.com/1.0/ReleaseNotes/:idx", releaseNotes)
+	l.Mount(r)
 
 	fmt.Printf("Listening on http://%s\n", *addr)
 	if err := http.ListenAndServe(*addr, r); err != nil {
@@ -175,8 +160,10 @@ func main() {
 	}
 }
 
-func handler(h http.Handler) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		h.ServeHTTP(w, r)
-	}
+type uptimeCounter time.Time
+
+func (c uptimeCounter) WritePrometheus(w io.Writer) {
+	m := metrics.NewSet()
+	m.NewCounter("kfwproxy_uptime_seconds_total").Set(uint64(int(time.Now().Sub(time.Time(c)).Seconds())))
+	m.WritePrometheus(w)
 }
