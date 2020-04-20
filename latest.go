@@ -39,15 +39,34 @@ type tS struct {
 }
 
 func NewLatestTracker() *LatestTracker {
-	// note: this must be initialized in this way, as an atomic.Value can't be copied after being stored
 	l := &LatestTracker{}
+
+	// note: this must be initialized in this way, as an atomic.Value can't be copied after being stored
 	l.v.Store(vS{})
 	l.t.Store(tS{})
+
+	go l.notify()
 	return l
 }
 
 func (l *LatestTracker) Notify(n ...Notifier) {
 	l.n = append(l.n, n...)
+}
+
+// notify watches for version changes every 5 seconds. This is done to prevent
+// false positives for new versions if the affiliates are not all on the same
+// version during the first set of requests when kfwproxy starts.
+func (l *LatestTracker) notify() {
+	var o Version
+	for range time.Tick(time.Second * 5) {
+		n := l.v.Load().(vS).v
+		if o.Less(n) {
+			for _, v := range l.n {
+				go v.NotifyVersion(o, n)
+			}
+			o = n
+		}
+	}
 }
 
 func (l *LatestTracker) InterceptUpgradeCheck(buf []byte) {
@@ -57,9 +76,6 @@ func (l *LatestTracker) InterceptUpgradeCheck(buf []byte) {
 			v := MustExtractVersion(u)
 			if cv := l.v.Load().(vS); cv.v.Less(v) {
 				l.v.Store(vS{v, u})
-				for _, n := range l.n {
-					go n.NotifyVersion(cv.v, v)
-				}
 			}
 		}
 		if u := s.ReleaseNoteURL; u != "" {
