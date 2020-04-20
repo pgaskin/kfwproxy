@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -84,12 +85,19 @@ func main() {
 		return
 	}
 
-	c := &http.Client{Timeout: *timeout}
-	h := newMemoryCache(*cacheLimit*1000000, *verbose)
-	l := &latestTracker{}
-	r := httprouter.New()
+	var p []interface {
+		WritePrometheus(io.Writer)
+	}
 
-	var t *TelegramNotifier
+	c := &http.Client{Timeout: *timeout}
+
+	h := newMemoryCache(*cacheLimit*1000000, *verbose)
+	go h.CleanEvery(time.Minute)
+	p = append(p, h)
+
+	l := NewLatestTracker()
+	p = append(p, l)
+
 	if *telegramBot != "" {
 		go func() {
 			fmt.Printf("Telegram: initializing.\n")
@@ -103,13 +111,12 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Telegram: error: %v.\n", err)
 			}
 			fmt.Printf("Telegram: sending notifications to %+s via %s.\n", *telegramChat, tc.GetUsername())
-			l.Notify(tn.NotifyVersion)
-			t = tn
+			l.Notify(tn)
+			p = append(p, tn)
 		}()
 	}
 
-	go h.CleanEvery(time.Minute)
-
+	r := httprouter.New()
 	r.GET("/", handler(http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect)))
 	r.GET("/stats", handler(http.HandlerFunc(h.HandleStats)))
 	r.GET("/latest/notes", handler(http.HandlerFunc(l.HandleNotes)))
@@ -120,10 +127,8 @@ func main() {
 	r.GET("/latest/version/redir", handler(http.HandlerFunc(l.HandleVersionRedir)))
 
 	r.GET("/metrics", handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.WritePrometheus(w)
-		l.WritePrometheus(w)
-		if t != nil {
-			t.WritePrometheus(w)
+		for _, m := range p {
+			m.WritePrometheus(w)
 		}
 	})))
 
