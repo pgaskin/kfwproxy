@@ -8,7 +8,6 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,16 +18,16 @@ import (
 )
 
 type latestTracker struct {
-	version    version
+	version    Version
 	versionURL string
 	notes      uint64
 	notesURL   string
 	versionMu  sync.RWMutex
 	notesMu    sync.RWMutex
-	notifier   []func(old, new version)
+	notifier   []func(old, new Version)
 }
 
-func (l *latestTracker) Notify(fn func(old, new version)) {
+func (l *latestTracker) Notify(fn func(old, new Version)) {
 	if fn != nil {
 		l.notifier = append(l.notifier, fn)
 	}
@@ -97,7 +96,7 @@ func (l *latestTracker) UpdateVersion(url string) {
 	l.versionMu.Lock()
 	defer l.versionMu.Unlock()
 	if url != "" {
-		new := extractVersion(url)
+		new := MustExtractVersion(url)
 		if old := l.version; old.Less(new) {
 			l.version = new
 			l.versionURL = url
@@ -127,39 +126,4 @@ func (l *latestTracker) InterceptUpgradeCheck(buf []byte) {
 	_ = json.Unmarshal(buf, &s)
 	l.UpdateVersion(s.UpgradeURL)
 	l.UpdateNotes(s.ReleaseNoteURL)
-}
-
-type version [3]uint64
-
-var versionRe = regexp.MustCompile(`([0-9]+)\.([0-9]+)(?:\.([0-9]+))?`)
-
-func extractVersion(str string) version {
-	m := versionRe.FindStringSubmatch(str)
-	var v version
-	var err error
-	for i := range v {
-		if i+1 < len(m) && m[i+1] != "" {
-			v[i], err = strconv.ParseUint(m[i+1], 10, 64)
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
-	return v
-}
-
-func (v version) String() string {
-	return fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2])
-}
-
-func (v version) Less(w version) bool {
-	return !(v[0] > w[0] || (v[0] == w[0] && (v[1] > w[1] || (v[1] == w[1] && (v[2] > w[2] || v[2] == w[2])))))
-}
-
-func (v version) Equal(w version) bool {
-	return v[0] == w[0] && v[1] == w[1] && v[2] == w[2]
-}
-
-func (v version) Zero() bool {
-	return v[0] == 0 && v[1] == 0 && v[2] == 0
 }

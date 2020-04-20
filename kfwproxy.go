@@ -119,7 +119,7 @@ func main() {
 					fmt.Printf("Telegram: sending new versions to %s (%s) via %s.\n", u, id, tc.GetUsername())
 					tms := t.NewCounter("kfwproxy_telegram_messages_sent_total{bot=\"" + tc.GetUsername() + "\",chat=\"" + u + "\"}")
 					tme := t.NewCounter("kfwproxy_telegram_messages_errored_total{bot=\"" + tc.GetUsername() + "\",chat=\"" + u + "\"}")
-					l.Notify(func(old, new version) {
+					l.Notify(func(old, new Version) {
 						if old.Zero() && !f {
 							fmt.Printf("Telegram: not sending message to %s (%s) about (%s, %s) since original version is zero (i.e. kfwproxy just started).\n", u, id, old, new)
 							return
