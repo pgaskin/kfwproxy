@@ -123,7 +123,7 @@ func main() {
 			}
 			tn, _ := NewTelegramNotifier(tc, *telegramChat, *telegramForce, log.With().Str("component", "telegram").Logger())
 			l.Notify(tn)
-			p = append(p, l)
+			p = append(p, tn)
 			log.Info().Str("component", "kfwproxy").Msg("initialized Telegram")
 		}()
 	}

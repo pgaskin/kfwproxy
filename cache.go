@@ -61,7 +61,7 @@ func (r *RistrettoCache) Get(key string) ([]byte, http.Header, time.Time, time.T
 func (r *RistrettoCache) WritePrometheus(w io.Writer) {
 	m := metrics.NewSet() // note: these metrics will be accurate to 2 seconds, since that's the current ristretto TTL cleanup interval
 	m.NewGauge("kfwproxy_cache_len_count", func() float64 { return float64(int(r.r.Metrics.KeysAdded() - r.r.Metrics.KeysEvicted())) })
-	m.NewGauge("kfwproxy_cache_size_count", func() float64 { return float64(int(r.r.Metrics.CostAdded() - r.r.Metrics.CostEvicted())) })
+	m.NewGauge("kfwproxy_cache_size_bytes", func() float64 { return float64(int(r.r.Metrics.CostAdded() - r.r.Metrics.CostEvicted())) })
 	m.NewCounter("kfwproxy_cache_hits_count").Set(r.r.Metrics.Hits())
 	m.NewCounter("kfwproxy_cache_misses_count").Set(r.r.Metrics.Misses())
 	m.NewCounter("kfwproxy_cache_puts_count").Set(r.r.Metrics.KeysAdded() + r.r.Metrics.KeysUpdated())
