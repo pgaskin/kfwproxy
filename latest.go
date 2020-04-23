@@ -16,6 +16,7 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/julienschmidt/httprouter"
 	"github.com/pbnjay/pixfont"
+	"github.com/rs/zerolog"
 )
 
 type LatestTracker struct {
@@ -24,8 +25,9 @@ type LatestTracker struct {
 	// because we only update it for a new version and it's nearly impossible
 	// that multiple versions will be released at the exact same instant and
 	// will disappear at the next one.
-	v atomic.Value
-	t atomic.Value
+	v   atomic.Value
+	t   atomic.Value
+	log zerolog.Logger
 }
 
 type vS struct {
@@ -38,8 +40,8 @@ type tS struct {
 	u string
 }
 
-func NewLatestTracker() *LatestTracker {
-	l := &LatestTracker{}
+func NewLatestTracker(log zerolog.Logger) *LatestTracker {
+	l := &LatestTracker{log: log}
 
 	// note: this must be initialized in this way, as an atomic.Value can't be copied after being stored
 	l.v.Store(vS{})
@@ -61,6 +63,11 @@ func (l *LatestTracker) notify() {
 	for range time.Tick(time.Second * 5) {
 		n := l.v.Load().(vS).v
 		if o.Less(n) {
+			l.log.Info().
+				Str("what", "notify").
+				Str("old", n.String()).
+				Str("new", n.String()).
+				Msg("notifying about new version")
 			for _, v := range l.n {
 				go v.NotifyVersion(o, n)
 			}
@@ -75,6 +82,11 @@ func (l *LatestTracker) InterceptUpgradeCheck(buf []byte) {
 		if u := s.UpgradeURL; u != "" {
 			v := MustExtractVersion(u)
 			if cv := l.v.Load().(vS); cv.v.Less(v) {
+				l.log.Info().
+					Str("what", "intercept-version").
+					Str("new", v.String()).
+					Str("url", u).
+					Msg("intercepted newer upgrade check version")
 				l.v.Store(vS{v, u})
 			}
 		}
@@ -82,6 +94,11 @@ func (l *LatestTracker) InterceptUpgradeCheck(buf []byte) {
 			if x := strings.LastIndex(u, "/"); x != -1 {
 				t, _ := strconv.ParseUint(u[x+1:], 10, 64)
 				if ct := l.t.Load().(tS); ct.t < t {
+					l.log.Info().
+						Str("what", "intercept-notes").
+						Uint64("new", t).
+						Str("url", u).
+						Msg("intercepted newer upgrade check notes")
 					l.t.Store(tS{t, u})
 				}
 			}

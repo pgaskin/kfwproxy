@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/VictoriaMetrics/metrics"
+	"github.com/rs/zerolog"
 )
 
 type Notifier interface {
@@ -12,9 +13,10 @@ type Notifier interface {
 }
 
 type TelegramNotifier struct {
-	t *Telegram
-	c map[string]*cS
-	m *metrics.Set
+	t   *Telegram
+	c   map[string]*cS
+	m   *metrics.Set
+	log zerolog.Logger
 }
 
 type cS struct {
@@ -26,7 +28,7 @@ type cS struct {
 // NewTelegramNotifier creates a new TelegramNotifier. If any chats failed to
 // register, each error is returned in the list. All chats in forcedChats must
 // also be in chats or it will panic.
-func NewTelegramNotifier(t *Telegram, chats []string, forcedChats []string) (*TelegramNotifier, []error) {
+func NewTelegramNotifier(t *Telegram, chats []string, forcedChats []string, log zerolog.Logger) (*TelegramNotifier, []error) {
 	var errs []error
 	ac := make(map[string]*cS, len(chats))
 
@@ -34,15 +36,22 @@ func NewTelegramNotifier(t *Telegram, chats []string, forcedChats []string) (*Te
 	m.NewGauge(`kfwproxy_telegram_chats_registered_count{bot="`+t.GetUsername()+`"}`, func() float64 { return float64(len(ac) - len(errs)) })
 	m.NewGauge(`kfwproxy_telegram_chats_errored_count{bot="`+t.GetUsername()+`"}`, func() float64 { return float64(len(errs)) })
 
+	log.Info().Msg("Initializing chats")
 	for _, c := range chats {
 		if _, ok := ac[c]; ok {
-			panic(fmt.Sprintf("duplicate chat %#v", c))
+			log.Fatal().Msgf("Duplicate chat %#v", c)
+			panic("")
 		}
 		u, err := t.GetChatUsername(c)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("initialize chat %#v: %w", c, err))
+			log.Err(err).Msgf("Could not initialize chat %#v", c)
 			continue
 		}
+		log.Info().
+			Str("id", c).
+			Str("username", u).
+			Msgf("Sending notifications to %#v (%s) via %#v", u, c, t.GetUsername())
 		ac[c] = &cS{
 			f: false,
 			c: c,
@@ -68,13 +77,20 @@ func NewTelegramNotifier(t *Telegram, chats []string, forcedChats []string) (*Te
 		}
 	}
 
-	return &TelegramNotifier{t, ac, m}, errs
+	return &TelegramNotifier{t, ac, m, log}, errs
 }
 
 func (t *TelegramNotifier) NotifyVersion(old, new Version) {
+	t.log.Info().
+		Str("old", old.String()).
+		Str("new", new.String()).
+		Msgf("sending notifications about %s", new)
 	for _, c := range t.c {
 		if old.Zero() && !c.f {
-			fmt.Printf("Telegram: not sending message to %s (%s) about (%s, %s) since original version is zero (i.e. kfwproxy just started).\n", c.u, c.c, old, new)
+			t.log.Info().
+				Str("id", c.c).
+				Str("username", c.u).
+				Msgf("not sending message to %s (%s) about (%s, %s) since original version is zero (i.e. kfwproxy just started)", c.u, c.c, old, new)
 			continue
 		}
 		fmt.Printf("Telegram: sending message to %s (%s) about (%s, %s).\n", c.u, c.c, old, new)

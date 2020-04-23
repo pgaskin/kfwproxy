@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/hlog"
 )
 
 // ProxyHandler forwards the GET/OPTIONS/HEAD request (everything after the
@@ -34,9 +37,14 @@ type ProxyHandler struct {
 	CacheID  func(*http.Request) string // required if Cache set, passed the user's request, not the upstream one
 }
 
-// TODO: reimplement logging
-
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var log zerolog.Logger
+	if hl := hlog.FromRequest(r); hl != nil {
+		log = hl.With().Str("component", "proxy").Logger()
+	} else {
+		log = zerolog.Nop()
+	}
+
 	if r.Method == "OPTIONS" {
 		p.transformHeaders(w)
 		w.Header().Set("Content-Length", "0")
@@ -44,6 +52,7 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" && r.Method != "HEAD" {
+		log.Warn().Msg("method not allowed")
 		p.transformHeaders(w)
 		w.Header().Del("Content-Length")
 		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
@@ -59,16 +68,22 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if p.Cache != nil {
 		if cbuf, chdr, cexp, ct, ok := p.Cache.Get(p.CacheID(r)); ok {
+			log.Debug().
+				Time("cache_time", ct).
+				Time("cache_expiry", cexp).
+				Msg("serving from cache")
 			status, buf, hdr = http.StatusOK, cbuf, chdr
 			cached, exp = ct.Format(http.TimeFormat), cexp
 		}
 	}
 
 	if cached == "" {
-		ustatus, ubuf, uhdr, err := p.upstream(r)
+		log.Debug().Msg("making upstream request")
+		ustatus, ubuf, uhdr, err := p.upstream(r, log)
 		if err != nil {
 			p.transformHeaders(w)
 			w.Header().Del("Content-Length")
+			log.Err(err).Msg("upstream")
 			http.Error(w, fmt.Sprintf("%s: proxy %#v: %v", r.URL.String(), http.StatusText(http.StatusBadGateway), err), http.StatusBadGateway)
 			return
 		}
@@ -83,6 +98,12 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			cached, exp = "no", time.Time{}
 		}
 	}
+
+	log.Info().
+		Int("status", status).
+		Str("cached", cached).
+		Time("expiry", exp).
+		Msg("response")
 
 	for k, v := range hdr {
 		w.Header()[k] = v
@@ -111,7 +132,7 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *ProxyHandler) upstream(r *http.Request) (int, []byte, http.Header, error) {
+func (p *ProxyHandler) upstream(r *http.Request, log zerolog.Logger) (int, []byte, http.Header, error) {
 	u, err := url.Parse(strings.TrimLeft(r.URL.Path, "/"))
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("extract upstream URL from %#v: %w", r.URL, err)
@@ -139,6 +160,11 @@ func (p *ProxyHandler) upstream(r *http.Request) (int, []byte, http.Header, erro
 	if p.UserAgent != "" {
 		nr.Header.Set("User-Agent", p.UserAgent)
 	}
+
+	log.Debug().
+		Str("method", nr.Method).
+		Str("url", nr.URL.String()).
+		Msg("sending upstream request")
 
 	var resp *http.Response
 	if p.Client == nil {
