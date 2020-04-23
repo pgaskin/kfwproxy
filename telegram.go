@@ -7,14 +7,14 @@ import (
 	"net/url"
 )
 
-type telegram struct {
+type Telegram struct {
 	c *http.Client
 	t string
 	u string
 }
 
-func newTelegram(c *http.Client, token string) (*telegram, error) {
-	tc := &telegram{c: c, t: token}
+func NewTelegram(c *http.Client, token string) (*Telegram, error) {
+	tc := &Telegram{c: c, t: token}
 	if tc.c == nil {
 		tc.c = http.DefaultClient
 	}
@@ -29,11 +29,11 @@ func newTelegram(c *http.Client, token string) (*telegram, error) {
 	return tc, nil
 }
 
-func (tc *telegram) GetUsername() string {
+func (tc *Telegram) GetUsername() string {
 	return tc.u
 }
 
-func (tc *telegram) GetChatUsername(id string) (string, error) {
+func (tc *Telegram) GetChatUsername(id string) (string, error) {
 	var obj struct {
 		Username string `json:"username"`
 	}
@@ -45,7 +45,7 @@ func (tc *telegram) GetChatUsername(id string) (string, error) {
 	return obj.Username, nil
 }
 
-func (tc *telegram) SendMessage(id, text string) error {
+func (tc *Telegram) SendMessage(id, text string) error {
 	if err := tc.api("sendMessage", url.Values{
 		"chat_id":                  {id},
 		"text":                     {text},
@@ -57,7 +57,7 @@ func (tc *telegram) SendMessage(id, text string) error {
 	return nil
 }
 
-func (tc *telegram) api(method string, params url.Values, out interface{}) error {
+func (tc *Telegram) api(method string, params url.Values, out interface{}) error {
 	var p string
 	if params != nil {
 		p = "?" + params.Encode()

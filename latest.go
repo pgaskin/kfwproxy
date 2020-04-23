@@ -8,158 +8,157 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
+	"github.com/julienschmidt/httprouter"
 	"github.com/pbnjay/pixfont"
+	"github.com/rs/zerolog"
 )
 
-type latestTracker struct {
-	version    version
-	versionURL string
-	notes      uint64
-	notesURL   string
-	versionMu  sync.RWMutex
-	notesMu    sync.RWMutex
-	notifier   []func(old, new version)
+type LatestTracker struct {
+	n []Notifier
+	// note: this is more efficient than a mutex, and ordering isn't critical
+	// because we only update it for a new version and it's nearly impossible
+	// that multiple versions will be released at the exact same instant and
+	// will disappear at the next one.
+	v   atomic.Value
+	t   atomic.Value
+	log zerolog.Logger
 }
 
-func (l *latestTracker) Notify(fn func(old, new version)) {
-	if fn != nil {
-		l.notifier = append(l.notifier, fn)
+type vS struct {
+	v Version
+	u string
+}
+
+type tS struct {
+	t uint64
+	u string
+}
+
+func NewLatestTracker(log zerolog.Logger) *LatestTracker {
+	l := &LatestTracker{log: log}
+
+	// note: this must be initialized in this way, as an atomic.Value can't be copied after being stored
+	l.v.Store(vS{})
+	l.t.Store(tS{})
+
+	go l.notify()
+	return l
+}
+
+func (l *LatestTracker) Notify(n ...Notifier) {
+	l.n = append(l.n, n...)
+}
+
+// notify watches for version changes every 5 seconds. This is done to prevent
+// false positives for new versions if the affiliates are not all on the same
+// version during the first set of requests when kfwproxy starts.
+func (l *LatestTracker) notify() {
+	var o Version
+	for range time.Tick(time.Second * 5) {
+		n := l.v.Load().(vS).v
+		if o.Less(n) {
+			l.log.Info().
+				Str("what", "notify").
+				Str("old", n.String()).
+				Str("new", n.String()).
+				Msg("notifying about new version")
+			for _, v := range l.n {
+				go v.NotifyVersion(o, n)
+			}
+			o = n
+		}
 	}
 }
 
-func (l *latestTracker) WritePrometheus(w io.Writer) {
-	l.versionMu.Lock()
-	defer l.versionMu.Unlock()
+func (l *LatestTracker) InterceptUpgradeCheck(buf []byte) {
+	var s struct{ UpgradeURL, ReleaseNoteURL string }
+	if err := json.Unmarshal(buf, &s); err == nil {
+		if u := s.UpgradeURL; u != "" {
+			v := MustExtractVersion(u)
+			if cv := l.v.Load().(vS); cv.v.Less(v) {
+				l.log.Info().
+					Str("what", "intercept-version").
+					Str("new", v.String()).
+					Str("url", u).
+					Msg("intercepted newer upgrade check version")
+				l.v.Store(vS{v, u})
+			}
+		}
+		if u := s.ReleaseNoteURL; u != "" {
+			if x := strings.LastIndex(u, "/"); x != -1 {
+				t, _ := strconv.ParseUint(u[x+1:], 10, 64)
+				if ct := l.t.Load().(tS); ct.t < t {
+					l.log.Info().
+						Str("what", "intercept-notes").
+						Uint64("new", t).
+						Str("url", u).
+						Msg("intercepted newer upgrade check notes")
+					l.t.Store(tS{t, u})
+				}
+			}
+		}
+	}
+}
 
+func (l *LatestTracker) WritePrometheus(w io.Writer) {
 	m := metrics.NewSet()
-	if !l.version.Zero() {
-		m.NewGauge("kfwproxy_latest_version{full=\""+l.version.String()+"\"}", func() float64 { return float64(int(l.version[2])) })
+	if cv := l.v.Load().(vS); !cv.v.Zero() {
+		m.NewGauge(`kfwproxy_latest_version{full="`+cv.v.String()+`"}`, func() float64 { return float64(int(cv.v[2])) })
 	}
-	if l.notes != 0 {
-		m.NewGauge("kfwproxy_latest_notes", func() float64 { return float64(int(l.notes)) })
+	if ct := l.t.Load().(tS); ct.t != 0 {
+		m.NewGauge(`kfwproxy_latest_notes`, func() float64 { return float64(int(ct.t)) })
 	}
 	m.WritePrometheus(w)
 }
 
-func (l *latestTracker) HandleVersion(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "%s", l.version)
-}
+func (l *LatestTracker) Mount(r *httprouter.Router) {
+	r.GET("/latest/notes", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		fmt.Fprintf(w, "%d", l.t.Load().(tS).t)
+	})
 
-func (l *latestTracker) HandleNotes(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "%d", l.notes)
-}
+	r.GET("/latest/version", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		fmt.Fprintf(w, "%s", l.v.Load().(vS).v)
+	})
 
-func (l *latestTracker) HandleVersionSVG(w http.ResponseWriter, r *http.Request) {
-	fn := func(p, d string) string {
-		if v := r.URL.Query().Get(p); v != "" {
-			return strings.ReplaceAll(v, `"`, `'`)
-		}
-		return d
-	}
-	fw := fn("fw", "72")
-	fh := fn("fh", "12")
-	ff := fn("ff", "Verdana, Arial, Helvetica, sans-serif")
-	fc := fn("fc", "#000")
-
-	w.Header().Set("Content-Type", "image/svg+xml")
-	w.Header().Set("Cache-Control", "no-store, must-revalidate")
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="%s" height="%s"><text x="0" y="%s" font-size="%s" font-family="%s" fill="%s">%s</text><!--%s--></svg>`, fw, fh, fh, fh, ff, fc, l.version, time.Now())
-}
-
-func (l *latestTracker) HandleVersionPNG(w http.ResponseWriter, r *http.Request) {
-	l.versionMu.RLock()
-	defer l.versionMu.RUnlock()
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "no-store, must-revalidate")
-	font := pixfont.Font8x8
-	iw, ih := font.MeasureString(l.version.String()), font.GetHeight()
-	img := image.NewRGBA(image.Rect(0, 0, iw, ih))
-	font.DrawString(img, 0, 0, l.version.String(), color.Black)
-	png.Encode(w, img)
-}
-
-func (l *latestTracker) HandleVersionRedir(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, l.versionURL, http.StatusTemporaryRedirect)
-}
-
-func (l *latestTracker) HandleNotesRedir(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, l.notesURL, http.StatusTemporaryRedirect)
-}
-
-func (l *latestTracker) UpdateVersion(url string) {
-	l.versionMu.Lock()
-	defer l.versionMu.Unlock()
-	if url != "" {
-		new := extractVersion(url)
-		if old := l.version; old.Less(new) {
-			l.version = new
-			l.versionURL = url
-			for _, fn := range l.notifier {
-				go fn(old, new)
+	r.GET("/latest/version/svg", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		fn := func(p, d string) string {
+			if v := r.URL.Query().Get(p); v != "" {
+				return strings.ReplaceAll(v, `"`, `'`)
 			}
+			return d
 		}
-	}
-}
+		fw := fn("fw", "72")
+		fh := fn("fh", "12")
+		ff := fn("ff", "Verdana, Arial, Helvetica, sans-serif")
+		fc := fn("fc", "#000")
 
-func (l *latestTracker) UpdateNotes(url string) {
-	l.notesMu.Lock()
-	defer l.notesMu.Unlock()
-	if url != "" {
-		spl := strings.Split(url, "/")
-		if len(spl) > 0 {
-			if i, err := strconv.ParseUint(strings.Split(spl[len(spl)-1], "?")[0], 10, 64); err == nil && l.notes < i {
-				l.notes = i
-				l.notesURL = url
-			}
-		}
-	}
-}
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="%s" height="%s"><text x="0" y="%s" font-size="%s" font-family="%s" fill="%s">%s</text><!--%s--></svg>`, fw, fh, fh, fh, ff, fc, l.v.Load().(vS).v, time.Now())
+	})
 
-func (l *latestTracker) InterceptUpgradeCheck(buf []byte) {
-	var s struct{ UpgradeURL, ReleaseNoteURL string }
-	_ = json.Unmarshal(buf, &s)
-	l.UpdateVersion(s.UpgradeURL)
-	l.UpdateNotes(s.ReleaseNoteURL)
-}
+	r.GET("/latest/version/png", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		font := pixfont.Font8x8
+		v := l.v.Load().(vS).v.String()
+		iw, ih := font.MeasureString(v), font.GetHeight()
+		img := image.NewRGBA(image.Rect(0, 0, iw, ih))
+		font.DrawString(img, 0, 0, v, color.Black)
+		png.Encode(w, img)
+	})
 
-type version [3]uint64
+	r.GET("/latest/notes/redir", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		http.Redirect(w, r, l.t.Load().(tS).u, http.StatusTemporaryRedirect)
+	})
 
-var versionRe = regexp.MustCompile(`([0-9]+)\.([0-9]+)(?:\.([0-9]+))?`)
-
-func extractVersion(str string) version {
-	m := versionRe.FindStringSubmatch(str)
-	var v version
-	var err error
-	for i := range v {
-		if i+1 < len(m) && m[i+1] != "" {
-			v[i], err = strconv.ParseUint(m[i+1], 10, 64)
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
-	return v
-}
-
-func (v version) String() string {
-	return fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2])
-}
-
-func (v version) Less(w version) bool {
-	return !(v[0] > w[0] || (v[0] == w[0] && (v[1] > w[1] || (v[1] == w[1] && (v[2] > w[2] || v[2] == w[2])))))
-}
-
-func (v version) Equal(w version) bool {
-	return v[0] == w[0] && v[1] == w[1] && v[2] == w[2]
-}
-
-func (v version) Zero() bool {
-	return v[0] == 0 && v[1] == 0 && v[2] == 0
+	r.GET("/latest/version/redir", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		http.Redirect(w, r, l.v.Load().(vS).u, http.StatusTemporaryRedirect)
+	})
 }
