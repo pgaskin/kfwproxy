@@ -33,7 +33,7 @@ func NewTelegramNotifier(t *Telegram, chats []string, forcedChats []string, log 
 	ac := make(map[string]*cS, len(chats))
 
 	m := metrics.NewSet()
-	m.NewGauge(`kfwproxy_telegram_chats_registered_count{bot="`+t.GetUsername()+`"}`, func() float64 { return float64(len(ac) - len(errs)) })
+	m.NewGauge(`kfwproxy_telegram_chats_registered_count{bot="`+t.GetUsername()+`"}`, func() float64 { return float64(len(ac)) })
 	m.NewGauge(`kfwproxy_telegram_chats_errored_count{bot="`+t.GetUsername()+`"}`, func() float64 { return float64(len(errs)) })
 
 	log.Info().Msg("Initializing chats")
