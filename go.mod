@@ -3,6 +3,7 @@ module github.com/geek1011/kfwproxy
 go 1.14
 
 require (
+	github.com/PuerkitoBio/goquery v1.5.1
 	github.com/VictoriaMetrics/metrics v1.11.2
 	github.com/dgraph-io/ristretto v0.0.2
 	github.com/julienschmidt/httprouter v1.3.0

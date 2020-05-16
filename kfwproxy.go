@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -22,20 +24,26 @@ func main() {
 	telegramBot := pflag.StringP("telegram-bot", "B", "", "the Telegram bot token (to enable notifications) (requires telegram-chat)")
 	telegramChat := pflag.StringSliceP("telegram-chat", "b", nil, "the Telegram chat IDs to send messages to (find it using @IDBot) (can also specify a channel in the format @ChannelUsername) (requires telegram-bot)")
 	telegramForce := pflag.StringSlice("telegram-force", nil, "send Telegram messages to these chats even if the original version is zero (for debugging only)")
+	mobilereadUser := pflag.StringP("mobileread-user", "M", "", "the MobileRead credentials (to enable notifications) (requires mobileread-forum) (format: username:password)")
+	mobilereadForum := pflag.IntSliceP("mobileread-forum", "m", nil, "the MobileRead forum IDs to post threads to (requires mobileread-username and mobileread-password)")
+	mobilereadForce := pflag.IntSlice("mobileread-force", nil, "post MobileRead threads to these chats even if the original version is zero (for debugging only)")
 	logJSON := pflag.BoolP("log-json", "j", false, "use JSON for logs")
 	logLevel := pflag.IntP("log-level", "v", 1, "log level (0=debug, 1=info, 2=warn, 3=error)")
 	help := pflag.BoolP("help", "h", false, "show this help text")
 
 	envmap := map[string]string{
-		"addr":           "KFWPROXY_ADDR",
-		"timeout":        "KFWPROXY_TIMEOUT",
-		"cache-limit":    "KFWPROXY_CACHE_LIMIT",
-		"cache-time":     "KFWPROXY_CACHE_TIME",
-		"telegram-bot":   "KFWPROXY_TELEGRAM_BOT",
-		"telegram-chat":  "KFWPROXY_TELEGRAM_CHAT",
-		"telegram-force": "KFWPROXY_TELEGRAM_FORCE",
-		"log-json":       "KFWPROXY_LOG_JSON",
-		"log-level":      "KFWPROXY_LOG_LEVEL",
+		"addr":             "KFWPROXY_ADDR",
+		"timeout":          "KFWPROXY_TIMEOUT",
+		"cache-limit":      "KFWPROXY_CACHE_LIMIT",
+		"cache-time":       "KFWPROXY_CACHE_TIME",
+		"telegram-bot":     "KFWPROXY_TELEGRAM_BOT",
+		"telegram-chat":    "KFWPROXY_TELEGRAM_CHAT",
+		"telegram-force":   "KFWPROXY_TELEGRAM_FORCE",
+		"mobileread-user":  "KFWPROXY_MOBILEREAD_USER",
+		"mobileread-forum": "KFWPROXY_MOBILEREAD_FORUM",
+		"mobileread-force": "KFWPROXY_MOBILEREAD_FORCE",
+		"log-json":         "KFWPROXY_LOG_JSON",
+		"log-level":        "KFWPROXY_LOG_LEVEL",
 	}
 
 	if val, ok := os.LookupEnv("PORT"); ok {
@@ -82,6 +90,12 @@ func main() {
 		return
 	}
 
+	if (*mobilereadUser == "") != (len(*mobilereadForum) == 0) {
+		fmt.Fprintf(os.Stderr, "Error: Neither or both of mobileread-user and mobileread-forum must be specified.\n")
+		os.Exit(2)
+		return
+	}
+
 	for _, fid := range *telegramForce {
 		var f bool
 		for _, id := range *telegramChat {
@@ -91,6 +105,26 @@ func main() {
 		}
 		if !f {
 			fmt.Fprintf(os.Stderr, "Error: All chat IDs in telegram-force must be specified in telegram-chat as well.\n")
+			os.Exit(2)
+			return
+		}
+	}
+
+	if *mobilereadUser != "" && !strings.Contains(*mobilereadUser, ":") {
+		fmt.Fprintf(os.Stderr, "Error: mobileread-user must contain a ':' if set.\n")
+		os.Exit(2)
+		return
+	}
+
+	for _, fid := range *mobilereadForce {
+		var f bool
+		for _, id := range *mobilereadForum {
+			if id == fid {
+				f = true
+			}
+		}
+		if !f {
+			fmt.Fprintf(os.Stderr, "Error: All forum IDs in mobileread-force must be specified in mobileread-forum as well.\n")
 			os.Exit(2)
 			return
 		}
@@ -107,7 +141,8 @@ func main() {
 	}
 
 	var p []interface{ WritePrometheus(io.Writer) }
-	cl := &http.Client{Timeout: *timeout}
+	j, _ := cookiejar.New(nil)
+	cl := &http.Client{Timeout: *timeout, Jar: j}
 	uc := uptimeCounter(time.Now())
 	c := NewRistrettoCache(*cacheLimit * 1000000)
 	l := NewLatestTracker(log.With().Str("component", "latest").Logger())
@@ -125,6 +160,22 @@ func main() {
 			l.Notify(tn)
 			p = append(p, tn)
 			log.Info().Str("component", "kfwproxy").Msg("initialized Telegram")
+		}()
+	}
+
+	if *mobilereadUser != "" {
+		go func() {
+			log.Info().Str("component", "kfwproxy").Msg("initializing MobileRead")
+			spl := strings.SplitN(*mobilereadUser, ":", 2)
+			mr, err := NewMobileRead(cl, spl[0], spl[1])
+			if err != nil {
+				log.Err(err).Str("component", "kfwproxy").Msg("could not initialize MobileRead user")
+				return
+			}
+			mn, _ := NewMobileReadNotifier(mr, *mobilereadForum, *mobilereadForce, log.With().Str("component", "mobileread").Logger())
+			l.Notify(mn)
+			p = append(p, mn)
+			log.Info().Str("component", "kfwproxy").Msg("initialized MobileRead")
 		}()
 	}
 
