@@ -185,7 +185,7 @@ func (m *MobileReadNotifier) NotifyVersion(old, new Version) {
 		m.log.Info().
 			Int("forum", f.fi).
 			Msgf("posting thread to %d about (%s, %s)", f.fi, old, new)
-		if tid, err := m.mr.NewThread(f.fi, fmt.Sprintf(`Firmware %s`, new), fmt.Sprintf(`Firmware <b>%s</b> has been released.`+"\n\n"+`[SIZE=1][COLOR=#999][I]Automatically posted by [URL="https://kfwproxy.geek1011.net"]kfwproxy[/URL].[/I][/COLOR][/SIZE]`, new), "firmware, firmware release", true, false, true); err != nil {
+		if tid, err := m.mr.NewThread(f.fi, fmt.Sprintf(`Firmware %s`, new), fmt.Sprintf(`Firmware %s has been released.`+"\n\n"+`[SIZE=1][COLOR=#999][I]Automatically posted by [URL="https://kfwproxy.geek1011.net"]kfwproxy[/URL].[/I][/COLOR][/SIZE]`, new), "firmware, firmware release", true, false, true); err != nil {
 			f.e.Inc()
 		} else {
 			f.s.Inc()
