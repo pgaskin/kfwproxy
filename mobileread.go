@@ -157,9 +157,6 @@ func (mr *MobileRead) NewThread(forum int, subject, message, tagList string, sig
 		return 0, fmt.Errorf("parse thread page: %w", err)
 	}
 
-	h, _ := tdoc.Html()
-	fmt.Println(h, tresp.Request.URL)
-
 	if strings.Contains(tresp.Request.URL.Path, "newthread.php") {
 		return 0, fmt.Errorf("unknown error posting thread")
 	}
