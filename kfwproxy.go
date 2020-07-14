@@ -181,7 +181,7 @@ func main() {
 
 	r := httprouter.New()
 
-	r.Handler("GET", "/", http.RedirectHandler("https://github.com/geek1011/kfwproxy", http.StatusTemporaryRedirect))
+	r.Handler("GET", "/", http.RedirectHandler("https://github.com/pgaskin/kfwproxy", http.StatusTemporaryRedirect))
 
 	for _, v := range []struct {
 		u string
@@ -199,7 +199,7 @@ func main() {
 		}},
 	} {
 		v.h.Client = cl
-		v.h.UserAgent = "kfwproxy (github.com/geek1011/kfwproxy)"
+		v.h.UserAgent = "kfwproxy (github.com/pgaskin/kfwproxy)"
 		v.h.Server = "kfwproxy"
 		v.h.CORS = true
 		v.h.Cache = c

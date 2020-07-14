@@ -1,4 +1,4 @@
-module github.com/geek1011/kfwproxy
+module github.com/pgaskin/kfwproxy
 
 go 1.14
 

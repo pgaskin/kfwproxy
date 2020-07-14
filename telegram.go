@@ -67,7 +67,7 @@ func (tc *Telegram) api(method string, params url.Values, out interface{}) error
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("User-Agent", "kfwproxy (github.com/geek1011/kfwproxy)")
+	req.Header.Set("User-Agent", "kfwproxy (github.com/pgaskin/kfwproxy)")
 
 	resp, err := tc.c.Do(req)
 	if err != nil {
