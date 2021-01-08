@@ -201,6 +201,7 @@ func (p *ProxyHandler) transformHeaders(w http.ResponseWriter) {
 	if p.CORS {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		w.Header().Set("Access-Control-Expose-Headers", "X-KFWProxy-Request-ID, X-KFWProxy-Cached")
 	}
 }
 

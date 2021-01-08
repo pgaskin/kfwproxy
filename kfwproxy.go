@@ -238,6 +238,7 @@ func main() {
 		w.Header().Set("Server", "kfwproxy")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		w.Header().Set("Access-Control-Expose-Headers", "X-KFWProxy-Request-ID")
 		w.WriteHeader(http.StatusOK)
 		return
 	})
@@ -256,6 +257,7 @@ func main() {
 			w.Header().Set("Server", "kfwproxy")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+			w.Header().Set("Access-Control-Expose-Headers", "X-KFWProxy-Request-ID")
 
 			if r.Context().Value(batched) != nil {
 				log.Warn().Msg("recursive batch")
