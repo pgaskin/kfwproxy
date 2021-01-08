@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/NYTimes/gziphandler"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/julienschmidt/httprouter"
 	"github.com/rs/zerolog"
@@ -216,11 +221,8 @@ func main() {
 	})
 
 	l.Mount(r)
-	log.Info().
-		Str("component", "kfwproxy").
-		Str("addr", *addr).
-		Msgf("Listening on http://%s", *addr)
-	if err := http.ListenAndServe(*addr, hlog.NewHandler(log)(hlog.AccessHandler(func(r *http.Request, status, size int, duration time.Duration) {
+
+	hdl := hlog.NewHandler(log)(hlog.AccessHandler(func(r *http.Request, status, size int, duration time.Duration) {
 		hlog.FromRequest(r).Info().
 			Str("component", "http").
 			Str("method", r.Method).
@@ -229,7 +231,129 @@ func main() {
 			Int("size", size).
 			Dur("duration", duration).
 			Msg("handled")
-	})(hlog.RequestIDHandler("request_id", "X-KFWProxy-Request-ID")(r)))); err != nil {
+	})(hlog.RequestIDHandler("request_id", "X-KFWProxy-Request-ID")(r)))
+
+	r.HandlerFunc("OPTIONS", "/api.kobobooks.com", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "0")
+		w.Header().Set("Server", "kfwproxy")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		w.WriteHeader(http.StatusOK)
+		return
+	})
+
+	r.Handler("GET", "/api.kobobooks.com", func(hdl http.Handler) http.Handler {
+		type batchKey string
+		const batched = batchKey("batched")
+		return gziphandler.GzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var log zerolog.Logger
+			if hl := hlog.FromRequest(r); hl != nil {
+				log = hl.With().Str("component", "batch").Logger()
+			} else {
+				log = zerolog.Nop()
+			}
+
+			w.Header().Set("Server", "kfwproxy")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+
+			if r.Context().Value(batched) != nil {
+				log.Warn().Msg("recursive batch")
+				http.Error(w, "Batch recursion not allowed", http.StatusForbidden)
+				return
+			}
+
+			xs := r.URL.Query()["x"]
+			if len(xs) == 0 {
+				http.Error(w, "Parameter x[] missing for batch GET", http.StatusBadRequest)
+				return
+			}
+			if len(xs) > 20 {
+				log.Warn().Msg("too many requests in batch GET")
+				http.Error(w, "Too many requests in batch GET", http.StatusForbidden)
+				return
+			}
+
+			hd := r.URL.Query().Get("h")
+			if hd != "" && hd != "1" {
+				http.Error(w, "Parameter h must be 1 or unset for batch GET", http.StatusBadRequest)
+				return
+			}
+
+			log.Info().Int("n", len(xs)).Msg("processing batch request")
+
+			res := make([]struct {
+				Status int                 `json:"status"`
+				Header map[string][]string `json:"header,omitempty"`
+				Body   string              `json:"body"`
+			}, len(xs))
+
+			cache, noCache := int((*cacheTime).Seconds()), false
+
+			for i, x := range xs {
+				x = "/api.kobobooks.com/" + strings.TrimPrefix(x, "/")
+
+				rc := httptest.NewRecorder()
+				rq, err := http.NewRequestWithContext(context.WithValue(r.Context(), batched, true), "GET", x, nil)
+				if err != nil {
+					res[i].Status = http.StatusBadRequest
+					res[i].Body = err.Error()
+					continue
+				}
+
+				hdl.ServeHTTP(rc, rq)
+
+				// cache for the minimum max-age if all requests are successful
+				if !noCache {
+					if rc.Code != http.StatusOK {
+						noCache = true
+					} else if cc := rc.HeaderMap.Get("Cache-Control"); cc != "" { // kfwproxy endpoints return Cache-Control or nothing, so we don't need to handle Expires or the other ones
+						for _, ccs := range strings.Split(cc, ",") {
+							if strings.HasPrefix(strings.TrimSpace(ccs), "max-age=") {
+								if c, err := strconv.Atoi(strings.TrimSpace(strings.SplitN(ccs, "=", 2)[1])); err != nil {
+									continue
+								} else {
+									if c <= 0 {
+										noCache = true
+									} else if c < cache {
+										cache = c
+									}
+								}
+							}
+						}
+					}
+				}
+
+				res[i].Status = rc.Code
+				if hd == "1" {
+					res[i].Header = rc.HeaderMap
+				}
+				res[i].Body = rc.Body.String() // note: if binary responses are added anywhere in the future, it will need to be checked and return an error instead
+			}
+
+			if noCache {
+				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set("Pragma", "no-cache")
+				w.Header().Set("Expires", "0")
+			} else {
+				w.Header().Set("Cache-Control", "max-age="+strconv.Itoa(cache))
+				w.Header().Set("Expires", time.Now().Add(time.Duration(cache)*time.Second).Format(http.TimeFormat))
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+
+			enc := json.NewEncoder(w)
+			enc.SetEscapeHTML(false)
+			enc.Encode(res)
+		}))
+	}(hdl))
+
+	log.Info().
+		Str("component", "kfwproxy").
+		Str("addr", *addr).
+		Msgf("Listening on http://%s", *addr)
+	if err := http.ListenAndServe(*addr, hdl); err != nil {
 		log.Fatal().
 			Str("component", "kfwproxy").
 			AnErr("err", err).

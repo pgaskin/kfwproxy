@@ -3,6 +3,7 @@ module github.com/pgaskin/kfwproxy
 go 1.14
 
 require (
+	github.com/NYTimes/gziphandler v1.1.1
 	github.com/PuerkitoBio/goquery v1.6.0
 	github.com/VictoriaMetrics/metrics v1.12.3
 	github.com/dgraph-io/ristretto v0.0.3
