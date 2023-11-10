@@ -223,7 +223,7 @@ func main() {
 	l.Mount(r)
 
 	hdl := hlog.NewHandler(log)(hlog.AccessHandler(func(r *http.Request, status, size int, duration time.Duration) {
-		hlog.FromRequest(r).Info().
+		hlog.FromRequest(r).Debug().
 			Str("component", "http").
 			Str("method", r.Method).
 			Str("url", r.URL.String()).
