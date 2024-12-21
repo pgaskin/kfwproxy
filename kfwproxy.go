@@ -194,9 +194,14 @@ func main() {
 	}{
 		{"/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", &ProxyHandler{
 			PassHeaders: []string{"X-Kobo-Accept-Preview"},
-			Hook:        func(r *http.Request, buf []byte) { go l.InterceptUpgradeCheck(buf) },
-			CacheTTL:    *cacheTime,
-			CacheID:     func(r *http.Request) string { return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview") },
+			Hook: func(r *http.Request, buf []byte) {
+				if strings.HasPrefix(httprouter.ParamsFromContext(r.Context()).ByName("device"), "00000000-0000-0000-0000-0000000006") {
+					return // ignore tolino requests until we handle branched versions properly
+				}
+				go l.InterceptUpgradeCheck(buf)
+			},
+			CacheTTL: *cacheTime,
+			CacheID:  func(r *http.Request) string { return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview") },
 		}},
 		{"/api.kobobooks.com/1.0/ReleaseNotes/:idx", &ProxyHandler{
 			CacheTTL: time.Hour * 3,
