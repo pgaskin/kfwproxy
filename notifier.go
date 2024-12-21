@@ -187,6 +187,9 @@ func (m *MobileReadNotifier) NotifyVersion(old, new Version) {
 			Msgf("posting thread to %d about (%s, %s)", f.fi, old, new)
 		if tid, err := m.mr.NewThread(f.fi, fmt.Sprintf(`Firmware %s`, new), fmt.Sprintf(`Firmware %s has been released.`+"\n\n"+`[SIZE=1][COLOR=#999][I]Automatically posted by [URL="https://kfw.api.pgaskin.net"]kfwproxy[/URL].[/I][/COLOR][/SIZE]`, new), "firmware, firmware release", true, false, true); err != nil {
 			f.e.Inc()
+			m.log.Info().
+				Err(err).
+				Msgf("failed to post thread")
 		} else {
 			f.s.Inc()
 			m.log.Info().
