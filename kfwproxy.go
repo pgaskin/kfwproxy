@@ -194,7 +194,7 @@ func main() {
 	}{
 		{"/api.kobobooks.com/1.0/UpgradeCheck/Device/:device/:affiliate/:version/:serial", &ProxyHandler{
 			PassHeaders: []string{"X-Kobo-Accept-Preview"},
-			Hook:        func(buf []byte) { go l.InterceptUpgradeCheck(buf) },
+			Hook:        func(r *http.Request, buf []byte) { go l.InterceptUpgradeCheck(buf) },
 			CacheTTL:    *cacheTime,
 			CacheID:     func(r *http.Request) string { return r.URL.String() + r.Header.Get("X-Kobo-Accept-Preview") },
 		}},

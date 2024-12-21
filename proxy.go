@@ -27,9 +27,9 @@ type ProxyHandler struct {
 	KeepHeaders []string // optional (default: Content-Type)
 
 	// response transformation, processed immediately before writing the response (i.e. not stored in the cache)
-	Server string       // optional
-	CORS   bool         // optional
-	Hook   func([]byte) // optional
+	Server string                      // optional
+	CORS   bool                        // optional
+	Hook   func(*http.Request, []byte) // optional
 
 	// cache
 	Cache    Cache                      // optional
@@ -46,14 +46,14 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "OPTIONS" {
-		p.transformHeaders(w)
+		p.transformHeaders(r, w)
 		w.Header().Set("Content-Length", "0")
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 	if r.Method != "GET" && r.Method != "HEAD" {
 		log.Warn().Msg("method not allowed")
-		p.transformHeaders(w)
+		p.transformHeaders(r, w)
 		w.Header().Del("Content-Length")
 		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -81,7 +81,7 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Debug().Msg("making upstream request")
 		ustatus, ubuf, uhdr, err := p.upstream(r, log)
 		if err != nil {
-			p.transformHeaders(w)
+			p.transformHeaders(r, w)
 			w.Header().Del("Content-Length")
 			log.Err(err).Msg("upstream")
 			http.Error(w, fmt.Sprintf("%s: proxy %#v: %v", r.URL.String(), http.StatusText(http.StatusBadGateway), err), http.StatusBadGateway)
@@ -108,8 +108,8 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for k, v := range hdr {
 		w.Header()[k] = v
 	}
-	p.transformHeaders(w)
-	p.transformResponse(buf)
+	p.transformHeaders(r, w)
+	p.transformResponse(r, buf)
 
 	w.Header().Set("X-KFWProxy-Cached", cached)
 	if cached == "no" { // no cache available
@@ -194,7 +194,7 @@ func (p *ProxyHandler) upstream(r *http.Request, log zerolog.Logger) (int, []byt
 	return resp.StatusCode, buf, hdr, nil
 }
 
-func (p *ProxyHandler) transformHeaders(w http.ResponseWriter) {
+func (p *ProxyHandler) transformHeaders(r *http.Request, w http.ResponseWriter) {
 	if p.Server != "" {
 		w.Header().Add("Server", p.Server)
 	}
@@ -205,8 +205,8 @@ func (p *ProxyHandler) transformHeaders(w http.ResponseWriter) {
 	}
 }
 
-func (p *ProxyHandler) transformResponse(buf []byte) {
+func (p *ProxyHandler) transformResponse(r *http.Request, buf []byte) {
 	if p.Hook != nil {
-		p.Hook(buf)
+		p.Hook(r, buf)
 	}
 }
